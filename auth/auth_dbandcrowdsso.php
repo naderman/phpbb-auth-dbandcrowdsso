@@ -209,6 +209,7 @@ function login_dbandcrowdsso($username, $password, $ip = '', $browser = '', $for
 
 			$cookie_info = unserialize($config['crowdsso_cookie']);
 			setcookie($cookie_info->name, $session->token, 0, '/', $cookie_info->domain, $cookie_info->secure, true);
+			$_COOKIE[$cookie_info->name] = $session->token;
 
 			return $result;
 		}
@@ -298,6 +299,7 @@ function validate_session_dbandcrowdsso(&$user)
 
 			$cookie_info = unserialize($config['crowdsso_cookie']);
 			setcookie($cookie_info->name, '', time() - 3600, '/', $cookie_info->domain, $cookie_info->secure, true);
+			unset($_COOKIE[$cookie_info->name]);
 
 			return true;
 		}
