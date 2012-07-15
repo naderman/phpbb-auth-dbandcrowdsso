@@ -74,6 +74,11 @@ function dbandcrowdsso_request($query, $method = 'GET', $request_body = '')
 		}
 	}
 
+	if (!$response)
+	{
+		return $response;
+	}
+
 	$response = @json_decode($response);
 
 	if (!$response)
@@ -279,10 +284,24 @@ function autologin_dbandcrowdsso()
 */
 function validate_session_dbandcrowdsso(&$user)
 {
+	global $config;
+
 	$token = dbandcrowdsso_get_token();
 
 	if ($token)
 	{
+		// logout doesn't go to this API otherwise so need to use some trickery
+		if (preg_match('#\/ucp\.php\?mode=logout#', $_SERVER['REQUEST_URI']))
+		{
+			$query = 'rest/usermanagement/1/session/' . rawurlencode($token);
+			dbandcrowdsso_request($query, 'DELETE');
+
+			$cookie_info = unserialize($config['crowdsso_cookie']);
+			setcookie($cookie_info->name, '', time() - 3600, '/', $cookie_info->domain, $cookie_info->secure, true);
+
+			return true;
+		}
+
 		try
 		{
 			$query = 'rest/usermanagement/1/session/' . rawurlencode($token);
