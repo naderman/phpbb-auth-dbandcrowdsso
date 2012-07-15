@@ -31,8 +31,9 @@ function dbandcrowdsso_request($query, $method = 'GET', $request_body = '')
 			'method' => $method,
 			'header' =>
 				"Accept: application/json\r\n".
-				"Content-type: application/json\r\n".
+				"Content-Type: application/json\r\n".
 				"Authorization: Basic $authcode\r\n",
+			'follow_location' => false,
 		)
 	);
 
@@ -40,12 +41,14 @@ function dbandcrowdsso_request($query, $method = 'GET', $request_body = '')
 	{
 		$opts['http']['content'] = $request_body;
 	}
-//$config['crowdsso_url'] = 'http://burg06.de/';
+
 	$context = stream_context_create($opts);
 
 	$prev_error = error_get_last();
 
-	if (false === ($response = @file_get_contents($config['crowdsso_url'] . $query, false, $context)))
+	$url = strpos($query, 'http://') === 0 ? $query : $config['crowdsso_url'] . $query;
+
+	if (false === ($response = @file_get_contents($url, false, $context)))
 	{
 		$error = error_get_last();
 
@@ -62,6 +65,14 @@ function dbandcrowdsso_request($query, $method = 'GET', $request_body = '')
 	}
 
 	$prev_error = error_get_last();
+
+	foreach ($http_response_header as $header)
+	{
+		if (preg_match('/^\s*Location:\s*(\S+)$/', $header, $matches))
+		{
+			return dbandcrowdsso_request($matches[1]);
+		}
+	}
 
 	$response = @json_decode($response);
 
@@ -90,9 +101,10 @@ function dbandcrowdsso_get_token()
 
 	static $cookie_name = null;
 
-	if (null === $cookie_name) {
+	if (null === $cookie_name)
+	{
 		$cookie_info = unserialize($config['crowdsso_cookie']);
-		$cookie_name = $cookie_info->name;
+		$cookie_name = str_replace('.', '_', $cookie_info->name);
 	}
 
 	if (!isset($_COOKIE[$cookie_name]))
@@ -154,10 +166,21 @@ function init_dbandcrowdsso()
 */
 function login_dbandcrowdsso($username, $password, $ip = '', $browser = '', $forwarded_for = '')
 {
+	global $config;
+
 	$result = login_db($username, $password, $ip, $browser, $forwarded_for);
 
 	if ($result['status'] === LOGIN_SUCCESS)
 	{
+		$token = dbandcrowdsso_get_token();
+
+		if ($token)
+		{
+			// assume token is correct, afterall authentication was successful
+			// validate session will logout if they don't match anyway
+			return $result;
+		}
+
 		try
 		{
 			$user = $result['user_row'];
@@ -167,10 +190,12 @@ function login_dbandcrowdsso($username, $password, $ip = '', $browser = '', $for
 			$request_body = array(
 				'username' => $user['username'],
 				'password' => $password,
-				'validationFactors' => array(
-					array(
-						'name' => 'remote_address',
-						'value' => (string) $_SERVER['REMOTE_ADDR'],
+				'validation-factors' => array(
+					'validationFactors' => array(
+						array(
+							'name' => 'remote_address',
+							'value' => (string) $_SERVER['REMOTE_ADDR'],
+						),
 					),
 				),
 			);
@@ -224,11 +249,11 @@ function autologin_dbandcrowdsso()
 		$query = 'rest/usermanagement/1/session/' . rawurlencode($token);
 		$session = dbandcrowdsso_request($query);
 
-		if (isset($session['user']['name']))
+		if (isset($session->user) && isset($session->user->name))
 		{
 			$sql = 'SELECT *
 				FROM ' . USERS_TABLE . "
-				WHERE username_clean = '" . $db->sql_escape(utf8_clean_string($session['user']['name'])) . "'";
+				WHERE username_clean = '" . $db->sql_escape(utf8_clean_string($session->user->name)) . "'";
 			$result = $db->sql_query($sql);
 			$row = $db->sql_fetchrow($result);
 			$db->sql_freeresult($result);
@@ -273,9 +298,9 @@ function validate_session_dbandcrowdsso(&$user)
 			$session = dbandcrowdsso_request($query, 'POST', json_encode($request_body));
 
 			// Check if PHP_AUTH_USER is set and handle this case
-			if (isset($session['user']['name']))
+			if (isset($session->user) && isset($session->user->name))
 			{
-				return ($session['user']['name'] === $user['username']) ? true : false;
+				return ($session->user->name === $user['username']) ? true : false;
 			}
 		}
 		catch (RuntimeException $e)
