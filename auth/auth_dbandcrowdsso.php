@@ -29,27 +29,56 @@ function dbandcrowdsso_request($query, $method = 'GET', $request_body = '')
 	$opts = array(
 		'http' => array(
 			'method' => $method,
-			'header' => array(
-				'Accept' => 'application/json',
-				'Content-type' => 'application/json',
-				'Authorization' => 'Basic ' . $authcode,
-			),
-			'content' => $request_body,
+			'header' =>
+				"Accept: application/json\r\n".
+				"Content-type: application/json\r\n".
+				"Authorization: Basic $authcode\r\n",
 		)
 	);
 
+	if ($request_body)
+	{
+		$opts['http']['content'] = $request_body;
+	}
+//$config['crowdsso_url'] = 'http://burg06.de/';
 	$context = stream_context_create($opts);
+
+	$prev_error = error_get_last();
 
 	if (false === ($response = @file_get_contents($config['crowdsso_url'] . $query, false, $context)))
 	{
-		throw new RuntimeException('Crowd SSO HTTP Request failed with: ' . error_get_last());
+		$error = error_get_last();
+
+		if ($error != $prev_error)
+		{
+			$message = $error['message'] . ' in file ' . $error['file'] . ' on line ' . $error['line'];
+		}
+		else
+		{
+			$message = 'Unknown (' . $http_response_header[0] . ')';
+		}
+
+		throw new RuntimeException('Crowd SSO HTTP Request failed with: ' . $message);
 	}
+
+	$prev_error = error_get_last();
 
 	$response = @json_decode($response);
 
 	if (!$response)
 	{
-		throw new RuntimeException('Crowd SSO HTTP Request failed to decode JSON response: ' . error_get_last());
+		$error = error_get_last();
+
+		if ($error != $prev_error)
+		{
+			$message = $error['message'] . ' in file ' . $error['file'] . ' on line ' . $error['line'];
+		}
+		else
+		{
+			$message = 'Unknown';
+		}
+
+		throw new RuntimeException('Crowd SSO HTTP Request failed to decode JSON response: ' . $error['message'] . ' in file ' . $error['file'] . ' on line ' . $error['line']);
 	}
 
 	return $response;
@@ -63,7 +92,7 @@ function dbandcrowdsso_get_token()
 
 	if (null === $cookie_name) {
 		$cookie_info = unserialize($config['crowdsso_cookie']);
-		$cookie_name = $cookie_info['name'];
+		$cookie_name = $cookie_info->name;
 	}
 
 	if (!isset($_COOKIE[$cookie_name]))
@@ -90,11 +119,11 @@ function init_dbandcrowdsso()
 {
 	global $config, $user;
 
-	$query = 'rest/usermanagement/1/user?username=' . urlencode($user['username']);
+	$query = 'rest/usermanagement/1/user?username=' . urlencode($user->data['username']);
 
 	try
 	{
-		$user = dbandcrowdsso_request($query);
+		$admin_user = dbandcrowdsso_request($query);
 	}
 	catch (RuntimeException $e)
 	{
@@ -127,23 +156,29 @@ function login_dbandcrowdsso($username, $password, $ip = '', $browser = '', $for
 {
 	$result = login_db($username, $password, $ip, $browser, $forwarded_for);
 
-	if ($result['status'] === LOGIN_SUCESS)
+	if ($result['status'] === LOGIN_SUCCESS)
 	{
 		try
 		{
 			$user = $result['user_row'];
 
-			$query = 'rest/usermanagement/1/session/' . rawurlencode($token) . '?validate-password=false';
+			$query = 'rest/usermanagement/1/session?validate-password=false';
 
 			$request_body = array(
 				'username' => $user['username'],
+				'password' => $password,
 				'validationFactors' => array(
-					'name' => 'remote_address',
-					'value' => (string) $_SERVER['REMOTE_ADDR'],
+					array(
+						'name' => 'remote_address',
+						'value' => (string) $_SERVER['REMOTE_ADDR'],
+					),
 				),
 			);
 
 			$session = dbandcrowdsso_request($query, 'POST', json_encode($request_body));
+
+			$cookie_info = unserialize($config['crowdsso_cookie']);
+			setcookie($cookie_info->name, $session->token, 0, '/', $cookie_info->domain, $cookie_info->secure, true);
 
 			return $result;
 		}
