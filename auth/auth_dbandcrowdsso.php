@@ -50,18 +50,21 @@ function dbandcrowdsso_request($query, $method = 'GET', $request_body = '')
 
 	if (false === ($response = @file_get_contents($url, false, $context)))
 	{
-		$error = error_get_last();
-
-		if ($error != $prev_error)
+		if (!isset($http_response_header[0]) || $http_response_header[0] !== 'HTTP/1.1 201 Created')
 		{
-			$message = $error['message'] . ' in file ' . $error['file'] . ' on line ' . $error['line'];
-		}
-		else
-		{
-			$message = 'Unknown (' . $http_response_header[0] . ')';
-		}
+			$error = error_get_last();
 
-		throw new RuntimeException('Crowd SSO HTTP Request failed with: ' . $message);
+			if ($error != $prev_error)
+			{
+				$message = $error['message'] . ' in file ' . $error['file'] . ' on line ' . $error['line'];
+			}
+			else
+			{
+				$message = 'Unknown (' . $http_response_header[0] . ')';
+			}
+
+			throw new RuntimeException('Crowd SSO HTTP Request failed with: ' . $message);
+		}
 	}
 
 	$prev_error = error_get_last();
