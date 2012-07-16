@@ -275,12 +275,6 @@ function autologin_dbandcrowdsso()
 		{
 			$cookie_data['u'] = request_var($config['cookie_name'] . '_u', 0, false, true);
 			$cookie_data['k'] = request_var($config['cookie_name'] . '_k', '', false, true);
-			$session_id = request_var($config['cookie_name'] . '_sid', '', false, true);
-
-			if (empty($session_id))
-			{
-				$cookie_data = array('u' => 0, 'k' => '');
-			}
 		}
 
 		if (!$config['allow_autologin'])
@@ -298,7 +292,12 @@ function autologin_dbandcrowdsso()
 		// else try to log the user into the sso system too
 		try
 		{
-			$user = $result['user_row'];
+			$sql = 'SELECT *
+				FROM ' . USERS_TABLE . "
+				WHERE user_id = '" . (int) $cookie_data['u'] . "'";
+			$result = $db->sql_query($sql);
+			$user = $db->sql_fetchrow($result);
+			$db->sql_freeresult($result);
 
 			$query = 'rest/usermanagement/1/session?validate-password=false';
 
@@ -322,8 +321,8 @@ function autologin_dbandcrowdsso()
 		}
 		catch (RuntimeException $e)
 		{
-			return array();
 		}
+		return array();
 	}
 
 	try
