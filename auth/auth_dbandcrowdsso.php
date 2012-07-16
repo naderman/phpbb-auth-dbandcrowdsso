@@ -130,6 +130,27 @@ function dbandcrowdsso_get_cookie_info()
 	return dbandcrowdsso_request($query);
 }
 
+function dbandcrowdsso_setcookie($token, $expire = false)
+{
+	global $config;
+
+	$cookie_info = unserialize($config['crowdsso_cookie']);
+
+	if ($expire)
+	{
+		$token = '';
+		$time = time() - 3600;
+	}
+	else
+	{
+		$time = 0;
+	}
+
+	setcookie($cookie_info->name, $token, $time, '/', $cookie_info->domain, $cookie_info->secure, true);
+
+	$_COOKIE[$cookie_info->name] = $token;
+}
+
 /**
 * Connect to ldap server
 * Only allow changing authentication to ldap if we can connect to the ldap server
@@ -210,9 +231,7 @@ function login_dbandcrowdsso($username, $password, $ip = '', $browser = '', $for
 
 			$session = dbandcrowdsso_request($query, 'POST', json_encode($request_body));
 
-			$cookie_info = unserialize($config['crowdsso_cookie']);
-			setcookie($cookie_info->name, $session->token, 0, '/', $cookie_info->domain, $cookie_info->secure, true);
-			$_COOKIE[$cookie_info->name] = $session->token;
+			dbandcrowdsso_setcookie($session->token);
 
 			return $result;
 		}
@@ -244,13 +263,67 @@ function login_dbandcrowdsso($username, $password, $ip = '', $browser = '', $for
 */
 function autologin_dbandcrowdsso()
 {
-	global $db;
+	global $db, $config;
 
 	$token = dbandcrowdsso_get_token();
 
 	if (!$token)
 	{
-		return array();
+		$cookie_data			= array('u' => 0, 'k' => '');
+
+		if (isset($_COOKIE[$config['cookie_name'] . '_sid']) || isset($_COOKIE[$config['cookie_name'] . '_u']))
+		{
+			$cookie_data['u'] = request_var($config['cookie_name'] . '_u', 0, false, true);
+			$cookie_data['k'] = request_var($config['cookie_name'] . '_k', '', false, true);
+			$session_id = request_var($config['cookie_name'] . '_sid', '', false, true);
+
+			if (empty($session_id))
+			{
+				$cookie_data = array('u' => 0, 'k' => '');
+			}
+		}
+
+		if (!$config['allow_autologin'])
+		{
+			$cookie_data['k'] = false;
+		}
+
+		// if no phpbb autologin cookie is set, return an empty array -> new session
+		// validate session takes care of deleting the crowd cookie if the autologin is invalid
+		if (!$cookie_data['k'] || !$cookie_data['u'])
+		{
+			return array();
+		}
+
+		// else try to log the user into the sso system too
+		try
+		{
+			$user = $result['user_row'];
+
+			$query = 'rest/usermanagement/1/session?validate-password=false';
+
+			$request_body = array(
+				'username' => $user['username'],
+				'password' => $password,
+				'validation-factors' => array(
+					'validationFactors' => array(
+						array(
+							'name' => 'remote_address',
+							'value' => (string) $_SERVER['REMOTE_ADDR'],
+						),
+					),
+				),
+			);
+
+			$session = dbandcrowdsso_request($query, 'POST', json_encode($request_body));
+
+			dbandcrowdsso_setcookie($session->token);
+			$token = $session->token;
+		}
+		catch (RuntimeException $e)
+		{
+			return array();
+		}
 	}
 
 	try
@@ -300,9 +373,7 @@ function validate_session_dbandcrowdsso(&$user)
 			$query = 'rest/usermanagement/1/session/' . rawurlencode($token);
 			dbandcrowdsso_request($query, 'DELETE');
 
-			$cookie_info = unserialize($config['crowdsso_cookie']);
-			setcookie($cookie_info->name, '', time() - 3600, '/', $cookie_info->domain, $cookie_info->secure, true);
-			unset($_COOKIE[$cookie_info->name]);
+			dbandcrowdsso_setcookie('', true);
 
 			return true;
 		}
@@ -324,11 +395,20 @@ function validate_session_dbandcrowdsso(&$user)
 			// Check if PHP_AUTH_USER is set and handle this case
 			if (isset($session->user) && isset($session->user->name))
 			{
-				return ($session->user->name === $user['username']) ? true : false;
+				if ($session->user->name === $user['username'])
+				{
+					return true;
+				}
+				else
+				{
+					dbandcrowdsso_setcookie('', true);
+					return false;
+				}
 			}
 		}
 		catch (RuntimeException $e)
 		{
+			dbandcrowdsso_setcookie('', true);
 			return false;
 		}
 	}
@@ -338,6 +418,8 @@ function validate_session_dbandcrowdsso(&$user)
 	{
 		return true;
 	}
+
+	dbandcrowdsso_setcookie('', true);
 
 	return false;
 }
