@@ -148,7 +148,14 @@ function dbandcrowdsso_setcookie($token, $expire = false)
 
 	setcookie($cookie_info->name, $token, $time, '/', $cookie_info->domain, $cookie_info->secure, true);
 
-	$_COOKIE[$cookie_info->name] = $token;
+	if ($expire)
+	{
+		unset($_COOKIE[$cookie_info->name]);
+	}
+	else
+	{
+		$_COOKIE[$cookie_info->name] = $token;
+	}
 }
 
 /**
@@ -413,7 +420,6 @@ function validate_session_dbandcrowdsso(&$user)
 				}
 				else
 				{
-					dbandcrowdsso_setcookie('', true);
 					return false;
 				}
 			}
