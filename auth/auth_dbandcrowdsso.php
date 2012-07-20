@@ -267,68 +267,82 @@ function autologin_dbandcrowdsso()
 
 	$token = dbandcrowdsso_get_token();
 
-	if (!$token)
+	try
 	{
-		$cookie_data			= array('u' => 0, 'k' => '');
-
-		if (isset($_COOKIE[$config['cookie_name'] . '_sid']) || isset($_COOKIE[$config['cookie_name'] . '_u']))
+		if ($token)
 		{
-			$cookie_data['u'] = request_var($config['cookie_name'] . '_u', 0, false, true);
-			$cookie_data['k'] = request_var($config['cookie_name'] . '_k', '', false, true);
+			$query = 'rest/usermanagement/1/session/' . rawurlencode($token);
+			$session = dbandcrowdsso_request($query);
+
+			if (isset($session->user) && isset($session->user->name))
+			{
+				$sql = 'SELECT *
+					FROM ' . USERS_TABLE . "
+					WHERE username_clean = '" . $db->sql_escape(utf8_clean_string($session->user->name)) . "'";
+				$result = $db->sql_query($sql);
+				$row = $db->sql_fetchrow($result);
+				$db->sql_freeresult($result);
+
+				if ($row)
+				{
+					return $row;
+				}
+			}
 		}
+	}
+	catch (RuntimeException $e)
+	{
+		// ignore - no autologin
+	}
 
-		if (!$config['allow_autologin'])
-		{
-			$cookie_data['k'] = false;
-		}
+	$cookie_data            = array('u' => 0, 'k' => '');
 
-		// if no phpbb autologin cookie is set, return an empty array -> new session
-		// validate session takes care of deleting the crowd cookie if the autologin is invalid
-		if (!$cookie_data['k'] || !$cookie_data['u'])
-		{
-			return array();
-		}
+	if (isset($_COOKIE[$config['cookie_name'] . '_sid']) || isset($_COOKIE[$config['cookie_name'] . '_u']))
+	{
+		$cookie_data['u'] = request_var($config['cookie_name'] . '_u', 0, false, true);
+		$cookie_data['k'] = request_var($config['cookie_name'] . '_k', '', false, true);
+	}
 
-		// else try to log the user into the sso system too
-		try
-		{
-			$sql = 'SELECT *
-				FROM ' . USERS_TABLE . "
-				WHERE user_id = '" . (int) $cookie_data['u'] . "'";
-			$result = $db->sql_query($sql);
-			$user = $db->sql_fetchrow($result);
-			$db->sql_freeresult($result);
+	if (!$config['allow_autologin'])
+	{
+		$cookie_data['k'] = false;
+	}
 
-			$query = 'rest/usermanagement/1/session?validate-password=false';
-
-			$request_body = array(
-				'username' => $user['username'],
-				'password' => $password,
-				'validation-factors' => array(
-					'validationFactors' => array(
-						array(
-							'name' => 'remote_address',
-							'value' => (string) $_SERVER['REMOTE_ADDR'],
-						),
-					),
-				),
-			);
-
-			$session = dbandcrowdsso_request($query, 'POST', json_encode($request_body));
-
-			dbandcrowdsso_setcookie($session->token);
-			$token = $session->token;
-		}
-		catch (RuntimeException $e)
-		{
-		}
+	// if no phpbb autologin cookie is set, return an empty array -> new session
+	// validate session takes care of deleting the crowd cookie if the autologin is invalid
+	if (!$cookie_data['k'] || !$cookie_data['u'])
+	{
 		return array();
 	}
 
+	// else try to log the user into the sso system too
 	try
 	{
-		$query = 'rest/usermanagement/1/session/' . rawurlencode($token);
-		$session = dbandcrowdsso_request($query);
+		$sql = 'SELECT *
+			FROM ' . USERS_TABLE . "
+			WHERE user_id = '" . (int) $cookie_data['u'] . "'";
+		$result = $db->sql_query($sql);
+		$user = $db->sql_fetchrow($result);
+		$db->sql_freeresult($result);
+
+		$query = 'rest/usermanagement/1/session?validate-password=false';
+
+		$request_body = array(
+			'username' => $user['username'],
+			'password' => $password,
+			'validation-factors' => array(
+				'validationFactors' => array(
+					array(
+						'name' => 'remote_address',
+						'value' => (string) $_SERVER['REMOTE_ADDR'],
+					),
+				),
+			),
+		);
+
+		$session = dbandcrowdsso_request($query, 'POST', json_encode($request_body));
+
+		dbandcrowdsso_setcookie($session->token);
 
 		if (isset($session->user) && isset($session->user->name))
 		{
@@ -347,7 +361,6 @@ function autologin_dbandcrowdsso()
 	}
 	catch (RuntimeException $e)
 	{
-		// ignore - no autologin
 	}
 
 	return array();
