@@ -134,6 +134,11 @@ function dbandcrowdsso_setcookie($token, $expire = false)
 {
 	global $config;
 
+	if (defined('CROWD_LOGOUT'))
+	{
+		return;
+	}
+
 	$cookie_info = unserialize($config['crowdsso_cookie']);
 
 	if ($expire)
@@ -270,6 +275,11 @@ function login_dbandcrowdsso($username, $password, $ip = '', $browser = '', $for
 */
 function autologin_dbandcrowdsso()
 {
+	if (defined('CROWD_LOGOUT'))
+	{
+		return;
+	}
+
 	global $db, $config;
 
 	$token = dbandcrowdsso_get_token();
@@ -394,6 +404,7 @@ function validate_session_dbandcrowdsso(&$user)
 
 			dbandcrowdsso_setcookie('', true);
 
+			define('CROWD_LOGOUT', true);
 			return true;
 		}
 
